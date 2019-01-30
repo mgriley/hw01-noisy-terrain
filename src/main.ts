@@ -102,10 +102,23 @@ function main() {
   renderer.setClearColor(164.0 / 255.0, 233.0 / 255.0, 1.0, 1);
   gl.enable(gl.DEPTH_TEST);
 
+  /*
   const lambert = new ShaderProgram([
     new Shader(gl.VERTEX_SHADER, require('./shaders/terrain-vert.glsl')),
     new Shader(gl.FRAGMENT_SHADER, require('./shaders/terrain-frag.glsl')),
   ]);
+   */
+  const lambert = new ShaderProgram([
+    new Shader(gl.VERTEX_SHADER, require('./shaders/hex-vert.glsl')),
+    new Shader(gl.FRAGMENT_SHADER, require('./shaders/hex-frag.glsl')),
+  ]);
+
+  /*
+  const hex = new ShaderProgram([
+    new Shader(gl.VERTEX_SHADER, require('./shaders/hex-vert.glsl')),
+    new Shader(gl.FRAGMENT_SHADER, require('./shaders/hex-frag.glsl'))
+  ]);
+   */
 
   const flat = new ShaderProgram([
     new Shader(gl.VERTEX_SHADER, require('./shaders/flat-vert.glsl')),
