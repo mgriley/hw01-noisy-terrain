@@ -19,6 +19,19 @@ out float fs_Sine;
 const float pi = 3.141519;
 const float hex_radius = 2.0;
 
+
+const int NoneStage = 0;
+const int TileStage = 1;
+const int DesertStage = 2;
+
+struct StageState {
+  int active_stage;
+  vec2 pos;
+  float height;
+  vec3 normal;
+  vec3 color;
+};
+
 float random1( vec2 p , vec2 seed) {
   return fract(sin(dot(p + seed, vec2(127.1, 311.7))) * 43758.5453);
 }
@@ -125,7 +138,7 @@ vec2 hexagon_center(vec2 world_pos, float r) {
   return hex_to_world * out_pos;  
 }
 
-float height_for_pt(vec2 pt) {
+float height_for_pt_fail(vec2 pt) {
   float h_noise = surflet_noise(0.75 * pt, vec2(6.5, 92.1));
   //float h_noise = fbm_noise(1.0 * pt, vec2(6.5, 92.1));
   h_noise = (h_noise - 0.5) * 2.0;
@@ -134,7 +147,7 @@ float height_for_pt(vec2 pt) {
   return d;
 }
 
-float height_for_pt_fail(vec2 pt) {
+float height_for_pt(vec2 pt) {
   vec2 hex_center = hexagon_center(pt, hex_radius);
   float hex_dist = -sdf_hexagon(pt - hex_center, hex_radius);  
   float d = hex_dist;
@@ -142,8 +155,13 @@ float height_for_pt_fail(vec2 pt) {
   float max_height = 10.0;
   float tile_noise = surflet_noise(hex_center * 5.0, vec2(1.0, 78.0));
   bool is_tile = norm_d >= 0.1 && tile_noise > 0.6;
-  float tile_height = max_height * tile_noise;
-  d = tile_height * smoothstep(0.0, 1.0, norm_d);
+  if (is_tile) {
+    d = max_height * tile_noise;
+  } else {
+    d = 0.0;
+  }
+  //float tile_height = max_height * tile_noise;
+  //d = tile_height * smoothstep(0.0, 1.0, norm_d);
 
   //float erosion = random1(pt, vec2(12.0, 30.0));
   //erosion *= exp(-100.0 * norm_d);
@@ -156,6 +174,7 @@ float height_for_pt_fail(vec2 pt) {
   //d = max(d - erosion, 0.0);
 
   // texture
+  /*
   if (is_tile) {
     vec2 center_delta = pt - hex_center;
     float angle = atan(center_delta.y / center_delta.x);
@@ -169,6 +188,7 @@ float height_for_pt_fail(vec2 pt) {
   } else {
     fs_Col = vec4(0.0, 0.0, 0.5, 1.0);
   }
+  */
 
   return d;
 }
@@ -190,28 +210,43 @@ vec3 compute_normal(vec2 plane_pt) {
   return normal;
 }
 
-void main()
-{
-  fs_Pos = vs_Pos.xyz;
-	//fs_Sine = (sin((vs_Pos.x + u_PlanePos.x) * 3.14159 * 0.1) + cos((vs_Pos.z + u_PlanePos.y) * 3.14159 * 0.1));
+void apply_tiles(inout StageState state) {
+  float d = height_for_pt(state.pos);  
 
-  vec4 world_pos = u_Model * vs_Pos;
-  float d = height_for_pt(world_pos.xz);
-  world_pos.y = d;
+  state.height = d;
+  state.normal = compute_normal(state.pos);
+  state.active_stage = TileStage;
 
-  vec3 normal = compute_normal(world_pos.xz);
-  fs_Nor = vec4(normal, 0.0);
-  //fs_Col = vec4(1.0, 0.0, 0.0, 1.0);
-
-	vec3 col = vec3(1.0) - sign(d) * vec3(0.7, 0.2, 0.2);
+  vec3 col = vec3(1.0) - sign(d) * vec3(0.7, 0.2, 0.2);
   col /= 2.0;
 	col *= 1.0 - exp(-4.0 * abs(d));
-	fs_Col = vec4(col, 1.0);
+  state.color = col;
   //fs_Col = mix(vec4(1.0, 1.0, 1.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), 2.0*d-1.0);
   //fs_Col *= 1.0 - exp(-1.0 * abs(d));
   //fs_Col = vec4(0.5, 0.5, 0.0, 1.0);
   //fs_Col = mix(vec4(0.0), vec4(0.5, 0.0, 0.0, 1.0), pow(-d / hex_radius, 0.5));
-  //fs_Col = vec4(normal, 1.0);
+}
+
+void apply_desert(inout StageState state) {
+}
+
+void main()
+{
+	//fs_Sine = (sin((vs_Pos.x + u_PlanePos.x) * 3.14159 * 0.1) + cos((vs_Pos.z + u_PlanePos.y) * 3.14159 * 0.1));
+
+  fs_Pos = vs_Pos.xyz;
+
+  vec4 world_pos = u_Model * vs_Pos;
+
+  StageState state = StageState(NoneStage,
+    world_pos.xz + u_PlanePos,
+    0.0, vec3(0.0, 1.0, 0.0), vec3(0.0));
+  apply_tiles(state);
+  apply_desert(state);
+
+  world_pos.y = state.height;
+  fs_Nor = vec4(state.normal, 0.0);
+  fs_Col = vec4(state.color, 1.0);
 
   gl_Position = u_ViewProj * world_pos;
 }
