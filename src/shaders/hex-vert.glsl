@@ -16,6 +16,69 @@ out vec4 fs_Col;
 
 out float fs_Sine;
 
+const float hex_radius = 5.0;
+
+float random1( vec2 p , vec2 seed) {
+  return fract(sin(dot(p + seed, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float random1( vec3 p , vec3 seed) {
+  return fract(sin(dot(p + seed, vec3(987.654, 123.456, 531.975))) * 85734.3545);
+}
+
+vec2 random2( vec2 p , vec2 seed) {
+  return fract(sin(vec2(dot(p + seed, vec2(311.7, 127.1)), dot(p + seed, vec2(269.5, 183.3)))) * 85734.3545);
+}
+
+float interp_noise_2d(vec2 p, vec2 seed) {
+  // use the surface-lets technique
+  // scale is the length of a cell in the perlin grid
+  float scale = 10.0;
+  vec2 base = floor(p / scale);
+  vec2 corners[4] = vec2[4](
+    base,
+    base + vec2(1.0, 0.0),
+    base + vec2(0.0, 1.0),
+    base + vec2(1.0, 1.0)
+  );
+  float sum = 0.0;
+  for (int i = 0; i < 4; ++i) {
+    // this gives decent noise, too
+    /*
+    vec2 corner = scale * corners[i];
+    float corner_h = random1(corner, seed);
+    vec2 delta = corner - p;
+    float weight = 1.0 - smoothstep(0.0, scale, length(delta));
+    sum += weight * corner_h;
+    */
+
+    vec2 corner = scale * corners[i];
+    vec2 corner_dir = 2.0 * random2(corner, seed) - vec2(1.0);
+    vec2 delta = p - corner;
+    // this is the height if we were only on a slope of
+    // magnitude length(corner_dir) in the direction of corner_dir
+    float sloped_height = dot(delta, corner_dir);
+    float weight = 1.0 - smoothstep(0.0, scale, length(delta));
+    sum += 0.25 * weight * sloped_height;
+  }
+  return (sum + 1.0) / 2.0;
+}
+
+float some_noise(vec2 p, vec2 seed) {
+  float noise = interp_noise_2d(p, seed);
+  return 10.0 * (noise - 0.5) * 2.0;
+}
+
+float fbm_noise(vec2 p, vec2 seed) {
+  float sum = 0.0;
+  for (int i = 0; i < 8; ++i) {
+    float amp = pow(0.5, float(i));
+    float freq = pow(2.0, float(i));
+    sum += interp_noise_2d(p * freq, seed) * amp;
+  }
+  return sum;
+}
+
 // signed distance to a regular pentagon
 // Rotates the geometry such that the comparison from a point to a polygon
 // segment compares the point to a horizontal oriented side of the polygon
@@ -58,24 +121,26 @@ vec2 hexagon_center(vec2 world_pos, float r) {
   }
   return hex_to_world * out_pos;  
 }
-	
-float random1( vec2 p , vec2 seed) {
-  return fract(sin(dot(p + seed, vec2(127.1, 311.7))) * 43758.5453);
-}
-
-float random1( vec3 p , vec3 seed) {
-  return fract(sin(dot(p + seed, vec3(987.654, 123.456, 531.975))) * 85734.3545);
-}
-
-vec2 random2( vec2 p , vec2 seed) {
-  return fract(sin(vec2(dot(p + seed, vec2(311.7, 127.1)), dot(p + seed, vec2(269.5, 183.3)))) * 85734.3545);
-}
 
 float height_for_pt(vec2 pt) {
-  float hex_radius = 5.0;
   vec2 hex_center = hexagon_center(pt, 5.0);
-  //vec2 hex_center = vec2(0.0, 0.0);
   float d = sdf_hexagon(pt - hex_center, hex_radius);  
+  d *= -1.0;
+  float norm_d = d / hex_radius;
+  float max_height = 5.0;
+  if (norm_d >= 0.1) {
+    d = max_height * random1(hex_center, vec2(10.0, 20.0));
+  } else {
+    d = 0.0;
+  }
+  
+  //float erosion = random1(pt, vec2(12.0, 30.0));
+  //erosion *= exp(-30.0 * norm_d);
+  //d -= erosion * max_height;
+
+  float erosion = -5.0 * fbm_noise(pt, vec2(12.0, 31.0));
+  d -= erosion;
+
   return d;
 }
 
@@ -105,16 +170,19 @@ void main()
   float d = height_for_pt(world_pos.xz);
   world_pos.y = d;
 
+  vec3 normal = compute_normal(world_pos.xz);
+  fs_Nor = vec4(normal, 0.0);
+  //fs_Col = vec4(1.0, 0.0, 0.0, 1.0);
+
 	vec3 col = vec3(1.0) - sign(d) * vec3(0.7, 0.2, 0.2);
   col /= 2.0;
 	col *= 1.0 - exp(-4.0 * abs(d));
 	fs_Col = vec4(col, 1.0);
+  //fs_Col = mix(vec4(1.0, 1.0, 1.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), 2.0*d-1.0);
+  //fs_Col *= 1.0 - exp(-1.0 * abs(d));
   //fs_Col = vec4(0.5, 0.5, 0.0, 1.0);
   //fs_Col = mix(vec4(0.0), vec4(0.5, 0.0, 0.0, 1.0), pow(-d / hex_radius, 0.5));
-
-  vec3 normal = compute_normal(world_pos.xz);
-  fs_Nor = vec4(normal, 0.0);
-  //fs_Col = vec4(1.0, 0.0, 0.0, 1.0);
+  //fs_Col = vec4(normal, 1.0);
 
   gl_Position = u_ViewProj * world_pos;
 }
