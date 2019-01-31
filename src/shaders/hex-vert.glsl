@@ -16,7 +16,8 @@ out vec4 fs_Col;
 
 out float fs_Sine;
 
-const float hex_radius = 5.0;
+const float pi = 3.141519;
+const float hex_radius = 2.0;
 
 float random1( vec2 p , vec2 seed) {
   return fract(sin(dot(p + seed, vec2(127.1, 311.7))) * 43758.5453);
@@ -30,7 +31,7 @@ vec2 random2( vec2 p , vec2 seed) {
   return fract(sin(vec2(dot(p + seed, vec2(311.7, 127.1)), dot(p + seed, vec2(269.5, 183.3)))) * 85734.3545);
 }
 
-float interp_noise_2d(vec2 p, vec2 seed) {
+float surflet_noise(vec2 p, vec2 seed) {
   // use the surface-lets technique
   // scale is the length of a cell in the perlin grid
   float scale = 10.0;
@@ -65,16 +66,18 @@ float interp_noise_2d(vec2 p, vec2 seed) {
 }
 
 float some_noise(vec2 p, vec2 seed) {
-  float noise = interp_noise_2d(p, seed);
+  float noise = surflet_noise(p, seed);
   return 10.0 * (noise - 0.5) * 2.0;
 }
 
 float fbm_noise(vec2 p, vec2 seed) {
+  // Note: using surflet_noise makes this slowww
   float sum = 0.0;
-  for (int i = 0; i < 8; ++i) {
-    float amp = pow(0.5, float(i));
+  float persistence = 0.5;
+  for (int i = 0; i < 2; ++i) {
+    float amp = pow(persistence, float(i));
     float freq = pow(2.0, float(i));
-    sum += interp_noise_2d(p * freq, seed) * amp;
+    sum += surflet_noise(p * freq, seed) * amp;
   }
   return sum;
 }
@@ -123,23 +126,49 @@ vec2 hexagon_center(vec2 world_pos, float r) {
 }
 
 float height_for_pt(vec2 pt) {
-  vec2 hex_center = hexagon_center(pt, 5.0);
-  float d = sdf_hexagon(pt - hex_center, hex_radius);  
-  d *= -1.0;
+  float h_noise = surflet_noise(0.75 * pt, vec2(6.5, 92.1));
+  //float h_noise = fbm_noise(1.0 * pt, vec2(6.5, 92.1));
+  h_noise = (h_noise - 0.5) * 2.0;
+  float d = 10.0 * h_noise;
+
+  return d;
+}
+
+float height_for_pt_fail(vec2 pt) {
+  vec2 hex_center = hexagon_center(pt, hex_radius);
+  float hex_dist = -sdf_hexagon(pt - hex_center, hex_radius);  
+  float d = hex_dist;
   float norm_d = d / hex_radius;
-  float max_height = 5.0;
-  if (norm_d >= 0.1) {
-    d = max_height * random1(hex_center, vec2(10.0, 20.0));
-  } else {
-    d = 0.0;
-  }
-  
+  float max_height = 10.0;
+  float tile_noise = surflet_noise(hex_center * 5.0, vec2(1.0, 78.0));
+  bool is_tile = norm_d >= 0.1 && tile_noise > 0.6;
+  float tile_height = max_height * tile_noise;
+  d = tile_height * smoothstep(0.0, 1.0, norm_d);
+
   //float erosion = random1(pt, vec2(12.0, 30.0));
-  //erosion *= exp(-30.0 * norm_d);
+  //erosion *= exp(-100.0 * norm_d);
   //d -= erosion * max_height;
 
-  float erosion = -5.0 * fbm_noise(pt, vec2(12.0, 31.0));
-  d -= erosion;
+  // erode the tile more heavily around edges
+  //float erosion_weight = max_height * exp(-10.0 * hex_dist / hex_radius); 
+  float erosion_weight = 0.5 * exp(-1.0 * hex_dist / hex_radius);
+  float erosion = erosion_weight * surflet_noise(pt * 15.0, vec2(12.0, 31.0));
+  //d = max(d - erosion, 0.0);
+
+  // texture
+  if (is_tile) {
+    vec2 center_delta = pt - hex_center;
+    float angle = atan(center_delta.y / center_delta.x);
+    float val = sin(10.0 * angle);
+    vec3 color = vec3(0.0);
+    int height_band = int(floor(d)) % 2;
+    if (val > 0.0 && height_band == 0) {
+      color = vec3(0.75);
+    }
+    fs_Col = vec4(color, 1.0);
+  } else {
+    fs_Col = vec4(0.0, 0.0, 0.5, 1.0);
+  }
 
   return d;
 }
