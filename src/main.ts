@@ -147,7 +147,7 @@ function main() {
   }
 
   // This function will be called every frame
-  function tick() {
+  function tick(timestamp) {
     camera.update();
     stats.begin();
     gl.viewport(0, 0, window.innerWidth, window.innerHeight);
@@ -160,6 +160,9 @@ function main() {
       square,
     ]);
     stats.end();
+    let secs = timestamp / 1000.0;
+    lambert.setTime(secs);
+    flat.setTime(secs);
 
     // Tell the browser to call `tick` again whenever it renders a new frame
     requestAnimationFrame(tick);
@@ -176,7 +179,7 @@ function main() {
   camera.updateProjectionMatrix();
 
   // Start the render loop
-  tick();
+  requestAnimationFrame(tick);
 }
 
 main();

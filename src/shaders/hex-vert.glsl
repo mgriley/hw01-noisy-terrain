@@ -5,6 +5,7 @@ uniform mat4 u_Model;
 uniform mat4 u_ModelInvTr;
 uniform mat4 u_ViewProj;
 uniform vec2 u_PlanePos; // Our location in the virtual world displayed by the plane
+uniform float u_Time;
 
 in vec4 vs_Pos;
 in vec4 vs_Nor;
@@ -14,22 +15,16 @@ out vec3 fs_Pos;
 out vec4 fs_Nor;
 out vec4 fs_Col;
 
-out float fs_Sine;
-
 const float pi = 3.141519;
 const float hex_radius = 2.0;
-
-
-const int NoneStage = 0;
-const int TileStage = 1;
-const int DesertStage = 2;
+const float norm_hex_start = 0.1;
 
 struct StageState {
-  int active_stage;
   vec2 pos;
   float height;
   vec3 normal;
   vec3 color;
+  float norm_hex_dist;
 };
 
 float random1( vec2 p , vec2 seed) {
@@ -147,50 +142,36 @@ float height_for_pt_fail(vec2 pt) {
   return d;
 }
 
-float height_for_pt(vec2 pt) {
+float tile_height(vec2 pt, inout vec3 color, inout float norm_hex_dist) {
   vec2 hex_center = hexagon_center(pt, hex_radius);
   float hex_dist = -sdf_hexagon(pt - hex_center, hex_radius);  
   float d = hex_dist;
   float norm_d = d / hex_radius;
-  float max_height = 10.0;
+  float max_height = 12.0;
+  float h = 0.0;
+  float norm_gap = norm_hex_start;
+  float inclusion_noise = surflet_noise(hex_center * 5.0, vec2(4.8, 91.0));
   float tile_noise = surflet_noise(hex_center * 5.0, vec2(1.0, 78.0));
-  bool is_tile = norm_d >= 0.1 && tile_noise > 0.6;
-  if (is_tile) {
-    d = max_height * tile_noise;
-  } else {
-    d = 0.0;
+  if (norm_d >= norm_gap && inclusion_noise > 0.7) {
+    float step_weight = smoothstep(norm_gap, 2.0 * norm_gap, norm_d);
+    h = max_height * step_weight * tile_noise;
   }
-  //float tile_height = max_height * tile_noise;
-  //d = tile_height * smoothstep(0.0, 1.0, norm_d);
+  vec3 outer_color = vec3(1.0);
+  vec3 inner_color = vec3(0.11, 0.12, 0.13);
+  vec3 base_color = mix(outer_color, inner_color,
+    smoothstep(norm_gap, 2.0 * norm_gap, norm_d));
+  //float tree_band = 
+  //  (1.0 - pow(smoothstep(0.0, 1.0, sin(3.0*2.0*pi*norm_d)), 0.5));
+  float tree_band = 1.0;
+  color = tree_band * base_color;
+  norm_hex_dist = norm_d;
+  return h;
+}
 
-  //float erosion = random1(pt, vec2(12.0, 30.0));
-  //erosion *= exp(-100.0 * norm_d);
-  //d -= erosion * max_height;
-
-  // erode the tile more heavily around edges
-  //float erosion_weight = max_height * exp(-10.0 * hex_dist / hex_radius); 
-  float erosion_weight = 0.5 * exp(-1.0 * hex_dist / hex_radius);
-  float erosion = erosion_weight * surflet_noise(pt * 15.0, vec2(12.0, 31.0));
-  //d = max(d - erosion, 0.0);
-
-  // texture
-  /*
-  if (is_tile) {
-    vec2 center_delta = pt - hex_center;
-    float angle = atan(center_delta.y / center_delta.x);
-    float val = sin(10.0 * angle);
-    vec3 color = vec3(0.0);
-    int height_band = int(floor(d)) % 2;
-    if (val > 0.0 && height_band == 0) {
-      color = vec3(0.75);
-    }
-    fs_Col = vec4(color, 1.0);
-  } else {
-    fs_Col = vec4(0.0, 0.0, 0.5, 1.0);
-  }
-  */
-
-  return d;
+float height_for_pt(vec2 pt) {
+  vec3 color;
+  float hex_d;
+  return tile_height(pt, color, hex_d);
 }
 
 vec3 to_terrain_pt(vec2 pt) {
@@ -211,36 +192,41 @@ vec3 compute_normal(vec2 plane_pt) {
 }
 
 void apply_tiles(inout StageState state) {
-  float d = height_for_pt(state.pos);  
+  vec3 tile_color;
+  float norm_hex_dist;
+  float d = tile_height(state.pos, tile_color, norm_hex_dist);  
 
   state.height = d;
   state.normal = compute_normal(state.pos);
-  state.active_stage = TileStage;
-
-  vec3 col = vec3(1.0) - sign(d) * vec3(0.7, 0.2, 0.2);
-  col /= 2.0;
-	col *= 1.0 - exp(-4.0 * abs(d));
-  state.color = col;
-  //fs_Col = mix(vec4(1.0, 1.0, 1.0, 1.0), vec4(0.0, 0.0, 0.0, 1.0), 2.0*d-1.0);
-  //fs_Col *= 1.0 - exp(-1.0 * abs(d));
-  //fs_Col = vec4(0.5, 0.5, 0.0, 1.0);
-  //fs_Col = mix(vec4(0.0), vec4(0.5, 0.0, 0.0, 1.0), pow(-d / hex_radius, 0.5));
+  state.color = tile_color;
+  state.norm_hex_dist = norm_hex_dist;
 }
 
 void apply_desert(inout StageState state) {
+  float height_noise = surflet_noise(state.pos, vec2(90.0, 12.0));
+  //float adhesion_height =
+  //  pow(norm_
+  // also mix based on depth, like the fog! (then done, jesus)
+  // perturb the amount that it's mixed by, perhaps, so it shimmers
+  float height = 5.0 * height_noise;
+  float col_noise = surflet_noise(
+    vec2(state.pos.x, state.pos.y * 40.0), vec2(87.0, 4.0));
+  vec3 hill_col = mix(
+    vec3(0.98, 0.99, 1.0), vec3(0.31, 0.64, 0.89), col_noise);
+  if (height > state.height) {
+    state.height = height;
+    state.color = hill_col;
+  }
 }
 
 void main()
 {
-	//fs_Sine = (sin((vs_Pos.x + u_PlanePos.x) * 3.14159 * 0.1) + cos((vs_Pos.z + u_PlanePos.y) * 3.14159 * 0.1));
-
   fs_Pos = vs_Pos.xyz;
-
   vec4 world_pos = u_Model * vs_Pos;
 
-  StageState state = StageState(NoneStage,
+  StageState state = StageState(
     world_pos.xz + u_PlanePos,
-    0.0, vec3(0.0, 1.0, 0.0), vec3(0.0));
+    0.0, vec3(0.0, 1.0, 0.0), vec3(0.0), 0.0);
   apply_tiles(state);
   apply_desert(state);
 
